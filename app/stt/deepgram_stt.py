@@ -1,6 +1,5 @@
 from deepgram import (
     DeepgramClient,
-    DeepgramClientOptions,
     LiveTranscriptionEvents,
     LiveOptions,
 )
@@ -8,9 +7,8 @@ from deepgram import (
 
 class DeepgramSTT:
     def __init__(self, api_key: str):
-        config        = DeepgramClientOptions(verbose=False)
-        self.client   = DeepgramClient(api_key, config)
-        self.model    = "nova-3"
+        self.client = DeepgramClient(api_key)
+        self.model  = "nova-3"
 
     async def transcribe_stream(self, on_transcript):
         """
