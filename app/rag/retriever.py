@@ -4,12 +4,17 @@ from supabase import create_client
 
 class RAGRetriever:
     def __init__(self, supabase_url: str, supabase_key: str):
-        self.supabase = create_client(supabase_url, supabase_key)
-        self.model    = SentenceTransformer('BAAI/bge-m3')
+        self.supabase   = create_client(supabase_url, supabase_key)
+        self._model     = None  # lazy loaded on first call
+
+    def _get_model(self):
+        if self._model is None:
+            self._model = SentenceTransformer('BAAI/bge-m3')
+        return self._model
 
     def retrieve(self, query: str, threshold: float = 0.5, top_k: int = 5) -> list:
         """Convert query to vector and retrieve matching documents."""
-        query_embedding = self.model.encode(
+        query_embedding = self._get_model().encode(
             query, normalize_embeddings=True
         ).tolist()
 
