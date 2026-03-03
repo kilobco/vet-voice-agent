@@ -86,7 +86,7 @@ async def media_stream(websocket: WebSocket):
                 # Decode base64 audio and send to Deepgram
                 if stt_connection:
                     audio_bytes = base64.b64decode(data["media"]["payload"])
-                    await stt_connection.send(audio_bytes)
+                    await stt_connection.send_media(audio_bytes)
 
             elif data["event"] == "stop":
                 print("[Twilio] Stream stopped")
