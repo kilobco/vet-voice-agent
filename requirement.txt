@@ -1,0 +1,3 @@
+Huggingface
+sentense_transformers
+supabase

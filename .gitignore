@@ -1,0 +1,40 @@
+# Environment variables — never commit secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Model cache (large files downloaded by sentence-transformers)
+.cache/
+models/
+
+# HuggingFace cache
+~/.cache/huggingface/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Build
+dist/
+build/
+*.egg-info/

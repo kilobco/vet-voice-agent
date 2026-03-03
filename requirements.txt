@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+websockets
+deepgram-sdk
+anthropic
+supabase
+sentence-transformers
+twilio
+httpx
+python-dotenv
