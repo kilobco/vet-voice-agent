@@ -18,6 +18,12 @@ from config.settings       import (
 
 app = FastAPI()
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 # ── Initialize all services ───────────────────────────────────────────────────
 rag   = RAGRetriever(supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY)
 stt   = DeepgramSTT(api_key=DEEPGRAM_API_KEY)

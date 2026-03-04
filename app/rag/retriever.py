@@ -1,4 +1,3 @@
-from sentence_transformers import SentenceTransformer
 from supabase import create_client
 
 
@@ -9,6 +8,7 @@ class RAGRetriever:
 
     def _get_model(self):
         if self._model is None:
+            from sentence_transformers import SentenceTransformer  # lazy import — keeps torch off the startup path
             self._model = SentenceTransformer('BAAI/bge-m3')
         return self._model
 
