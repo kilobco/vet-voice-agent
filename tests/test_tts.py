@@ -1,26 +1,69 @@
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from app.tts.deepgram_tts import DeepgramTTS, _split_text
 
 
-@patch("app.tts.deepgram_tts.client")
-def test_synthesize_to_file(mock_client, tmp_path):
-    output_path = str(tmp_path / "output.wav")
-    mock_client.speak.rest.v.return_value.save.return_value = None
+# ── _split_text ───────────────────────────────────────────────────────────────
 
-    from app.tts.deepgram_tts import synthesize_to_file
-
-    synthesize_to_file("Hello, how can I help you?", output_path)
-    mock_client.speak.rest.v.return_value.save.assert_called_once()
+def test_split_text_short_passthrough():
+    assert _split_text("Hello.") == ["Hello."]
 
 
-@patch("app.tts.deepgram_tts.client")
-def test_synthesize_to_bytes_returns_bytes(mock_client):
-    mock_stream = MagicMock()
-    mock_stream.stream = [b"audio_chunk_1", b"audio_chunk_2"]
-    mock_client.speak.rest.v.return_value.stream.return_value = mock_stream
+def test_split_text_long_breaks_at_sentences():
+    long_text = ("This is a sentence. " * 120).strip()  # well over 2000 chars
+    chunks = _split_text(long_text)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert len(chunk) <= 2000
 
-    from app.tts.deepgram_tts import synthesize_to_bytes
 
-    result = synthesize_to_bytes("We are open Monday to Friday.")
+def test_split_text_exactly_at_limit():
+    text = "A" * 2000
+    assert _split_text(text) == [text]
+
+
+# ── DeepgramTTS ───────────────────────────────────────────────────────────────
+
+def test_init_uses_aura2():
+    tts = DeepgramTTS(api_key="test_key")
+    assert tts.model == "aura-2-asteria-en"
+
+
+async def test_synthesize_returns_bytes():
+    tts = DeepgramTTS(api_key="test_key")
+
+    mock_response = MagicMock()
+    mock_response.content = b"audio_data"
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__  = AsyncMock(return_value=False)
+    mock_client.post       = AsyncMock(return_value=mock_response)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await tts.synthesize("Hello.")
+
     assert isinstance(result, bytes)
-    assert len(result) > 0
+    assert result == b"audio_data"
+
+
+async def test_synthesize_chunks_long_text():
+    """Texts over 2000 chars should trigger multiple POST calls."""
+    tts = DeepgramTTS(api_key="test_key")
+
+    long_text = ("Short sentence. " * 130).strip()  # > 2000 chars
+
+    mock_response = MagicMock()
+    mock_response.content = b"chunk"
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__  = AsyncMock(return_value=False)
+    mock_client.post       = AsyncMock(return_value=mock_response)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await tts.synthesize(long_text)
+
+    assert mock_client.post.call_count > 1
+    assert isinstance(result, bytes)

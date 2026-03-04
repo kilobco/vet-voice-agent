@@ -41,12 +41,16 @@ class DeepgramSTT:
             channels        = 1,
             sample_rate     = 8000,      # Twilio sample rate
             interim_results = True,      # partial results while speaking
-            utterance_end_ms= "500",     # end of utterance after 0.5s silence
+            utterance_end_ms= "1000",    # end of utterance after 1s silence (min effective value)
             vad_events      = True,      # voice activity detection
         )
 
         await connection.start(options)
         return connection
+
+    async def keep_alive(self, connection) -> None:
+        """Send keepalive to prevent Deepgram disconnecting during silence (>10s)."""
+        await connection.keep_alive()
 
     async def close_stream(self, connection) -> None:
         """Cleanly close the stream when Twilio call ends."""

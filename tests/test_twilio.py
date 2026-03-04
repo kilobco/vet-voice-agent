@@ -1,39 +1,41 @@
-import pytest
 from unittest.mock import patch, MagicMock
+from fastapi.testclient import TestClient
 
 
-@pytest.fixture
-def flask_client():
-    from app.telephony.twilio_handler import app
-    app.config["TESTING"] = True
-    with app.test_client() as client:
-        yield client
+def _get_client():
+    # Patch supabase so module-level RAGRetriever init doesn't fail
+    with patch("supabase.create_client", return_value=MagicMock()):
+        from app.telephony.twilio_handler import app
+        return TestClient(app)
 
 
-def test_voice_webhook_returns_xml(flask_client):
-    response = flask_client.post("/voice", data={"CallSid": "CA123"})
+client = _get_client()
+
+
+def test_health_get():
+    response = client.get("/health")
     assert response.status_code == 200
-    assert b"<Response>" in response.data
-    assert b"Gather" in response.data or b"gather" in response.data.lower()
+    assert response.json() == {"status": "ok"}
 
 
-@patch("app.telephony.twilio_handler.answer")
-def test_handle_speech_returns_xml(mock_answer, flask_client):
-    mock_answer.return_value = "We are open Monday to Friday."
-    response = flask_client.post(
-        "/handle-speech",
-        data={
-            "CallSid": "CA123",
-            "SpeechResult": "What are your hours?",
-        },
-    )
+def test_health_head():
+    response = client.head("/health")
     assert response.status_code == 200
-    assert b"<Response>" in response.data
 
 
-def test_call_status_cleans_up(flask_client):
-    from app.telephony.twilio_handler import _conversations
-    _conversations["CA999"] = [{"role": "user", "content": "hi"}]
-    response = flask_client.post("/call-status", data={"CallSid": "CA999"})
-    assert response.status_code == 204
-    assert "CA999" not in _conversations
+def test_incoming_call_returns_xml():
+    response = client.post("/incoming-call")
+    assert response.status_code == 200
+    assert "xml" in response.headers["content-type"]
+    assert b"<Response>" in response.content
+
+
+def test_incoming_call_contains_stream():
+    response = client.post("/incoming-call")
+    # TwiML should instruct Twilio to open a media stream
+    assert b"Stream" in response.content or b"stream" in response.content.lower()
+
+
+def test_incoming_call_contains_greeting():
+    response = client.post("/incoming-call")
+    assert b"veterinary" in response.content.lower() or b"Alexander" in response.content
