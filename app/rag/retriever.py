@@ -1,23 +1,47 @@
-import asyncio
+import math
+import httpx
 from supabase import create_client
+
+HF_EMBEDDING_URL = "https://api-inference.huggingface.co/models/BAAI/bge-m3"
 
 
 class RAGRetriever:
-    def __init__(self, supabase_url: str, supabase_key: str):
-        self.supabase   = create_client(supabase_url, supabase_key)
-        self._model     = None  # lazy loaded on first call
+    def __init__(self, supabase_url: str, supabase_key: str, hf_token: str):
+        self.supabase  = create_client(supabase_url, supabase_key)
+        self.hf_token  = hf_token
 
-    def _get_model(self):
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer  # lazy import — keeps torch off the startup path
-            self._model = SentenceTransformer('BAAI/bge-m3')
-        return self._model
+    async def _embed(self, text: str) -> list:
+        """
+        Embed query text via HuggingFace Inference API (BAAI/bge-m3).
+        No local model — no RAM spike. Returns a normalized embedding vector.
+        """
+        headers = {"Authorization": f"Bearer {self.hf_token}"}
 
-    def _retrieve_sync(self, query: str, threshold: float, top_k: int) -> list:
-        """Blocking version — run via asyncio.to_thread from async callers."""
-        query_embedding = self._get_model().encode(
-            query, normalize_embeddings=True
-        ).tolist()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                HF_EMBEDDING_URL,
+                headers = headers,
+                json    = {"inputs": text},
+                timeout = 30.0,
+            )
+            response.raise_for_status()
+
+        embedding = response.json()
+
+        # HF returns [[...]] for a single string input
+        if isinstance(embedding[0], list):
+            embedding = embedding[0]
+
+        # L2 normalize to match how the stored embeddings were created
+        norm = math.sqrt(sum(x * x for x in embedding))
+        if norm > 0:
+            embedding = [x / norm for x in embedding]
+
+        return embedding
+
+    async def retrieve(self, query: str, threshold: float = 0.5, top_k: int = 5) -> list:
+        """Embed query and retrieve matching documents from Supabase."""
+        query_embedding = await self._embed(query)
 
         results = self.supabase.rpc('match_documents', {
             'query_embedding': query_embedding,
@@ -26,10 +50,6 @@ class RAGRetriever:
         }).execute()
 
         return results.data
-
-    async def retrieve(self, query: str, threshold: float = 0.5, top_k: int = 5) -> list:
-        """Convert query to vector and retrieve matching documents (non-blocking)."""
-        return await asyncio.to_thread(self._retrieve_sync, query, threshold, top_k)
 
     def format_context(self, docs: list) -> str:
         """Format retrieved docs into a single context string for the LLM."""

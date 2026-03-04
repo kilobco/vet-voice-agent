@@ -13,6 +13,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 # Anthropic
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+# HuggingFace (used for remote query embedding — no local model needed)
+HF_TOKEN = os.getenv("HF_TOKEN")
+
 # Twilio
 TWILIO_ACCOUNT_SID  = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN   = os.getenv("TWILIO_AUTH_TOKEN")

@@ -14,6 +14,7 @@ from config.settings       import (
     ANTHROPIC_API_KEY,
     SUPABASE_URL,
     SUPABASE_KEY,
+    HF_TOKEN,
 )
 
 app = FastAPI()
@@ -25,7 +26,7 @@ async def health():
 
 
 # ── Initialize all services ───────────────────────────────────────────────────
-rag   = RAGRetriever(supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY)
+rag   = RAGRetriever(supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY, hf_token=HF_TOKEN)
 stt   = DeepgramSTT(api_key=DEEPGRAM_API_KEY)
 tts   = DeepgramTTS(api_key=DEEPGRAM_API_KEY)
 agent = LLMAgent(anthropic_api_key=ANTHROPIC_API_KEY, rag=rag)

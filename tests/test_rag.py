@@ -4,7 +4,7 @@ from app.rag.retriever import RAGRetriever
 
 def _make_retriever():
     with patch("supabase.create_client", return_value=MagicMock()):
-        return RAGRetriever(supabase_url="http://localhost", supabase_key="test_key")
+        return RAGRetriever(supabase_url="http://localhost", supabase_key="test_key", hf_token="test_hf_token")
 
 
 # ── format_context ────────────────────────────────────────────────────────────
@@ -38,31 +38,25 @@ async def test_retrieve_returns_list():
 
     mock_result      = MagicMock()
     mock_result.data = [{"title": "Vaccines", "body": "Annual vaccines are recommended."}]
-
     r.supabase.rpc.return_value.execute.return_value = mock_result
 
-    mock_model = MagicMock()
-    mock_model.encode.return_value = MagicMock(tolist=lambda: [0.1] * 1024)
-    r._model = mock_model
-
-    results = await r.retrieve("What vaccines does my dog need?")
+    # Mock the HuggingFace embedding API call
+    with patch.object(r, "_embed", return_value=[0.1] * 1024):
+        results = await r.retrieve("What vaccines does my dog need?")
 
     assert isinstance(results, list)
     assert len(results) == 1
     assert results[0]["title"] == "Vaccines"
 
 
-async def test_retrieve_empty_query():
+async def test_retrieve_empty_results():
     r = _make_retriever()
 
     mock_result      = MagicMock()
     mock_result.data = []
-
     r.supabase.rpc.return_value.execute.return_value = mock_result
 
-    mock_model = MagicMock()
-    mock_model.encode.return_value = MagicMock(tolist=lambda: [0.0] * 1024)
-    r._model = mock_model
+    with patch.object(r, "_embed", return_value=[0.0] * 1024):
+        results = await r.retrieve("What vaccines does my dog need?")
 
-    results = await r.retrieve("")
     assert results == []
