@@ -50,6 +50,11 @@ def main():
 
     print(f"Loaded {len(rows)} rows from {CSV_PATH}")
 
+    # Clear existing rows before re-ingesting with new embeddings
+    print("Clearing existing rows...")
+    supabase.table("documents").delete().neq("title", "").execute()
+    print("Cleared.")
+
     # Process in batches
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i : i + BATCH_SIZE]
@@ -60,7 +65,7 @@ def main():
         print(f"Embedding rows {i+1}–{i+len(batch)}...")
         embeddings = embed_batch(texts)
 
-        # Upsert into Supabase (table: documents, columns: title, body, embedding)
+        # Insert into Supabase (table: documents, columns: title, body, embedding)
         records = [
             {
                 "title":     row["title"],
@@ -69,8 +74,8 @@ def main():
             }
             for row, embedding in zip(batch, embeddings)
         ]
-        supabase.table("documents").upsert(records, on_conflict="title").execute()
-        print(f"  Upserted {len(records)} records.")
+        supabase.table("documents").insert(records).execute()
+        print(f"  Inserted {len(records)} records.")
 
         # Small delay to stay within rate limits
         if i + BATCH_SIZE < len(rows):
