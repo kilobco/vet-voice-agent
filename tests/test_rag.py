@@ -4,7 +4,7 @@ from app.rag.retriever import RAGRetriever
 
 def _make_retriever():
     with patch("supabase.create_client", return_value=MagicMock()):
-        return RAGRetriever(supabase_url="http://localhost", supabase_key="test_key", hf_token="test_hf_token")
+        return RAGRetriever(supabase_url="http://localhost", supabase_key="test_key", jina_api_key="test_jina_key")
 
 
 # ── format_context ────────────────────────────────────────────────────────────

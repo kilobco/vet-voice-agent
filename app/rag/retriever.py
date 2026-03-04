@@ -1,43 +1,41 @@
-import math
 import httpx
 from supabase import create_client
 
-HF_EMBEDDING_URL = "https://api-inference.huggingface.co/models/BAAI/bge-m3"
+JINA_EMBEDDING_URL = "https://api.jina.ai/v1/embeddings"
+JINA_MODEL         = "jina-embeddings-v3"
 
 
 class RAGRetriever:
-    def __init__(self, supabase_url: str, supabase_key: str, hf_token: str):
-        self.supabase  = create_client(supabase_url, supabase_key)
-        self.hf_token  = hf_token
+    def __init__(self, supabase_url: str, supabase_key: str, jina_api_key: str):
+        self.supabase     = create_client(supabase_url, supabase_key)
+        self.jina_api_key = jina_api_key
 
     async def _embed(self, text: str) -> list:
         """
-        Embed query text via HuggingFace Inference API (BAAI/bge-m3).
-        No local model — no RAM spike. Returns a normalized embedding vector.
+        Embed query text via Jina AI API (jina-embeddings-v3).
+        Uses task='retrieval.query' for optimized query-side embeddings.
         """
-        headers = {"Authorization": f"Bearer {self.hf_token}"}
+        headers = {
+            "Authorization": f"Bearer {self.jina_api_key}",
+            "Content-Type":  "application/json",
+        }
+        payload = {
+            "model":      JINA_MODEL,
+            "input":      [text],
+            "task":       "retrieval.query",
+            "normalized": True,
+        }
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                HF_EMBEDDING_URL,
+                JINA_EMBEDDING_URL,
                 headers = headers,
-                json    = {"inputs": text},
+                json    = payload,
                 timeout = 30.0,
             )
             response.raise_for_status()
 
-        embedding = response.json()
-
-        # HF returns [[...]] for a single string input
-        if isinstance(embedding[0], list):
-            embedding = embedding[0]
-
-        # L2 normalize to match how the stored embeddings were created
-        norm = math.sqrt(sum(x * x for x in embedding))
-        if norm > 0:
-            embedding = [x / norm for x in embedding]
-
-        return embedding
+        return response.json()["data"][0]["embedding"]
 
     async def retrieve(self, query: str, threshold: float = 0.5, top_k: int = 5) -> list:
         """Embed query and retrieve matching documents from Supabase."""
