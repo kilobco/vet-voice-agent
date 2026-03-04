@@ -28,7 +28,7 @@ class LLMAgent:
 
         # Step 2 — build prompt with context
         user_message = f"""
-Context from restaurant knowledge base:
+Context from veterinary knowledge base:
 {context}
 
 Customer question: {question}
@@ -38,7 +38,7 @@ Answer the customer's question based on the context above.
 
         # Step 3 — call LLM
         response = await self.client.messages.create(
-            model      = "claude-sonnet-4-5",
+            model      = "claude-sonnet-4-6",
             max_tokens = 150,
             system     = SYSTEM_PROMPT,
             messages   = [{"role": "user", "content": user_message}],
@@ -58,7 +58,7 @@ Answer the customer's question based on the context above.
         context = self.rag.format_context(docs)
 
         user_message = f"""
-Context from restaurant knowledge base:
+Context from veterinary knowledge base:
 {context}
 
 Customer question: {question}
