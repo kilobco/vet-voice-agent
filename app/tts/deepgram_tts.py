@@ -28,7 +28,7 @@ def _split_text(text: str) -> list:
 class DeepgramTTS:
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.model   = "aura-2-asteria-en"   # Aura-2: current generation, higher quality
+        self.model   = "aura-asteria-en"   # Aura-1: stable, widely available
         self.headers = {
             "Authorization": f"Token {self.api_key}",
             "Content-Type":  "application/json",
