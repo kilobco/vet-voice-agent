@@ -16,7 +16,7 @@ class DeepgramSTT:
         on_transcript: async callback that receives transcript text.
         Returns the live connection — pipe Twilio audio chunks into it.
         """
-        connection = self.client.listen.asynclive.v("1")
+        connection = self.client.listen.asyncwebsocket.v("1")
 
         async def on_message(self_event, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
