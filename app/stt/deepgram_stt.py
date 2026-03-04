@@ -20,15 +20,15 @@ class DeepgramSTT:
         """
         connection = self.client.listen.asyncwebsocket.v("1")
 
-        async def on_message(result, **kwargs):
+        async def on_message(self_event, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
             if sentence.strip() and result.is_final:
                 await on_transcript(sentence)
 
-        async def on_error(error, **kwargs):
+        async def on_error(self_event, error, **kwargs):
             print(f"[STT] Error: {error}")
 
-        async def on_utterance_end(utterance_end, **kwargs):
+        async def on_utterance_end(self_event, utterance_end, **kwargs):
             print("[STT] Utterance ended — user finished speaking")
 
         connection.on(LiveTranscriptionEvents.Transcript,   on_message)
