@@ -1,4 +1,5 @@
 import re
+import asyncio
 import anthropic
 from datetime import datetime
 
@@ -78,17 +79,24 @@ Answer the customer's question. If they want to book an appointment, use the ava
             )
 
             if response.stop_reason == "tool_use":
+                tool_blocks = [b for b in response.content if b.type == "tool_use"]
+
+                for b in tool_blocks:
+                    print(f"[Tool] {b.name}({b.input})")
+
+                # Run all tools in this turn in parallel
+                raw_results = await asyncio.gather(
+                    *[self.booking.execute(b.name, b.input) for b in tool_blocks]
+                )
+
                 tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        print(f"[Tool] {block.name}({block.input})")
-                        result = await self.booking.execute(block.name, block.input)
-                        print(f"[Tool] Result: {result}")
-                        tool_results.append({
-                            "type":        "tool_result",
-                            "tool_use_id": block.id,
-                            "content":     result,
-                        })
+                for block, result in zip(tool_blocks, raw_results):
+                    print(f"[Tool] Result: {result}")
+                    tool_results.append({
+                        "type":        "tool_result",
+                        "tool_use_id": block.id,
+                        "content":     result,
+                    })
                 # Store full tool exchange in history so next turn remembers it
                 full_messages.append({"role": "assistant", "content": response.content})
                 full_messages.append({"role": "user",      "content": tool_results})
