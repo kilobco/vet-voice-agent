@@ -1,23 +1,48 @@
+import re
 import anthropic
-from app.rag.retriever import RAGRetriever
+from datetime import datetime
+
+from app.rag.retriever    import RAGRetriever
+from app.booking.tools    import BookingTools, TOOL_DEFINITIONS
 
 
-SYSTEM_PROMPT = """
-You are a helpful voice assistant for Dr. Alexander's veterinary clinic.
+def _build_system_prompt(caller_phone: str = None) -> str:
+    today      = datetime.now().strftime("%A, %B %d, %Y")
+    phone_line = f"The caller's phone number is {caller_phone}." if caller_phone else ""
+    return f"""You are a helpful voice assistant for Dr. Alexander's veterinary clinic.
 The caller has already been greeted — do NOT say hello or introduce the clinic again.
 Answer the caller's question directly and concisely.
 Keep responses short, clear, and conversational — they will be spoken out loud.
 Do not use bullet points, markdown, or lists. Speak in natural sentences.
-If you don't know the answer, politely say you will connect them with a staff member.
-"""
+Today is {today}. {phone_line}
+
+You can answer general veterinary questions AND book appointments.
+
+When a caller wants to book an appointment, follow these steps in order:
+1. Call lookup_caller with their phone number to check if they are in the system.
+2. If not found, ask for their first and last name, then call create_caller.
+3. Call get_pets to see their pets on file. If they have pets, ask which one. If none, ask for pet details and call create_pet.
+4. Ask the reason for the visit to determine which specialist is needed.
+5. Call get_doctors to find a suitable doctor.
+6. Ask for the caller's preferred date, then call get_available_slots.
+7. Suggest available times and let the caller pick one.
+8. Confirm all details out loud (pet, doctor, date, time, reason), then call book_appointment.
+
+If you don't know the answer to a clinical question, politely say you will connect them with a staff member."""
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [p.strip() for p in parts if p.strip()]
 
 
 class LLMAgent:
-    def __init__(self, anthropic_api_key: str, rag: RAGRetriever):
-        self.client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
-        self.rag    = rag
+    def __init__(self, anthropic_api_key: str, rag: RAGRetriever, booking: BookingTools):
+        self.client  = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
+        self.rag     = rag
+        self.booking = booking
 
-    async def ask(self, question: str, conversation_history: list = None) -> str:
+    async def ask_stream(self, question: str, conversation_history: list = None, caller_phone: str = None):
         if conversation_history is None:
             conversation_history = []
 
@@ -29,54 +54,44 @@ class LLMAgent:
 
 Customer question: {question}
 
-Answer the customer's question based on the context above."""
+Answer the customer's question. If they want to book an appointment, use the available tools."""
 
         messages = conversation_history + [{"role": "user", "content": user_message}]
+        system   = _build_system_prompt(caller_phone)
 
-        response = await self.client.messages.create(
-            model      = "claude-sonnet-4-6",
-            max_tokens = 300,
-            system     = SYSTEM_PROMPT,
-            messages   = messages,
-        )
+        # ── Tool-calling loop ─────────────────────────────────────────────────
+        while True:
+            response = await self.client.messages.create(
+                model      = "claude-sonnet-4-6",
+                max_tokens = 500,
+                system     = system,
+                messages   = messages,
+                tools      = TOOL_DEFINITIONS,
+            )
 
-        answer = response.content[0].text
-        print(f"[LLM] Question: {question}")
-        print(f"[LLM] Answer: {answer}")
-        return answer
+            if response.stop_reason == "tool_use":
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        print(f"[Tool] {block.name}({block.input})")
+                        result = await self.booking.execute(block.name, block.input)
+                        print(f"[Tool] Result: {result}")
+                        tool_results.append({
+                            "type":        "tool_result",
+                            "tool_use_id": block.id,
+                            "content":     result,
+                        })
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user",      "content": tool_results})
 
-    async def ask_stream(self, question: str, conversation_history: list = None):
-        if conversation_history is None:
-            conversation_history = []
+            else:
+                # Final text response — split into sentences for TTS
+                final_text = ""
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        final_text += block.text
 
-        docs    = await self.rag.retrieve(question)
-        context = self.rag.format_context(docs)
-
-        user_message = f"""Context from veterinary knowledge base:
-{context}
-
-Customer question: {question}
-
-Answer the customer's question based on the context above."""
-
-        messages = conversation_history + [{"role": "user", "content": user_message}]
-
-        buffer = ""
-        async with self.client.messages.stream(
-            model      = "claude-sonnet-4-6",
-            max_tokens = 300,
-            system     = SYSTEM_PROMPT,
-            messages   = messages,
-        ) as stream:
-            async for text in stream.text_stream:
-                buffer += text
-                if any(buffer.rstrip().endswith(p) for p in (".", "?", "!", "...")):
-                    sentence = buffer.strip()
-                    if sentence:
-                        print(f"[LLM] Chunk: {sentence}")
-                        yield sentence
-                    buffer = ""
-
-        if buffer.strip():
-            print(f"[LLM] Chunk: {buffer.strip()}")
-            yield buffer.strip()
+                for sentence in _split_sentences(final_text):
+                    print(f"[LLM] Chunk: {sentence}")
+                    yield sentence
+                break

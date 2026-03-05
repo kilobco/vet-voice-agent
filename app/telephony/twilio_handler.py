@@ -5,10 +5,11 @@ from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import Response
 from twilio.twiml.voice_response import VoiceResponse, Connect
 
-from app.stt.deepgram_stt import DeepgramSTT
+from app.stt.deepgram_stt  import DeepgramSTT
 from app.llm.agent         import LLMAgent
 from app.tts.deepgram_tts  import DeepgramTTS
 from app.rag.retriever     import RAGRetriever
+from app.booking.tools     import BookingTools
 from config.settings       import (
     DEEPGRAM_API_KEY,
     ANTHROPIC_API_KEY,
@@ -29,23 +30,28 @@ async def health():
 
 
 # ── Initialize all services ───────────────────────────────────────────────────
-rag   = RAGRetriever(supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY, jina_api_key=JINA_API_KEY)
-stt   = DeepgramSTT(api_key=DEEPGRAM_API_KEY)
-tts   = DeepgramTTS(api_key=DEEPGRAM_API_KEY)
-agent = LLMAgent(anthropic_api_key=ANTHROPIC_API_KEY, rag=rag)
+rag     = RAGRetriever(supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY, jina_api_key=JINA_API_KEY)
+booking = BookingTools(supabase_url=SUPABASE_URL, supabase_key=SUPABASE_KEY)
+stt     = DeepgramSTT(api_key=DEEPGRAM_API_KEY)
+tts     = DeepgramTTS(api_key=DEEPGRAM_API_KEY)
+agent   = LLMAgent(anthropic_api_key=ANTHROPIC_API_KEY, rag=rag, booking=booking)
 
 
 # ── Step 1: Twilio hits this endpoint when a call comes in ────────────────────
 @app.post("/incoming-call")
 async def incoming_call(request: Request):
     """
-    Return TwiML that opens a media stream — no <Say> here to avoid
-    the greeting audio being echoed into Deepgram STT.
-    The greeting is sent as TTS over the WebSocket once the stream opens.
+    Return TwiML that opens a media stream.
+    The caller's phone number is passed as a custom parameter so the
+    WebSocket handler can give it to the agent for caller lookup.
     """
+    form        = await request.form()
+    caller_phone = form.get("From", "")
+
     response = VoiceResponse()
     connect  = Connect()
-    connect.stream(url=f"wss://{request.headers['host']}/media-stream")
+    stream   = connect.stream(url=f"wss://{request.headers['host']}/media-stream")
+    stream.parameter(name="caller_phone", value=caller_phone)
     response.append(connect)
     return Response(content=str(response), media_type="application/xml")
 
@@ -55,16 +61,17 @@ async def incoming_call(request: Request):
 async def media_stream(websocket: WebSocket):
     """
     Twilio sends audio chunks here as base64-encoded mulaw.
-    Flow: greeting TTS → wait for mark → STT → LLM → TTS → Twilio.
+    Flow: greeting TTS → wait for mark → STT → LLM (with tools) → TTS → Twilio.
     """
     await websocket.accept()
     print("[Twilio] WebSocket connected")
 
     stream_sid           = None
+    caller_phone         = None
     stt_connection       = None
     response_task        = None
     conversation_history = []
-    ready_to_listen      = False  # True only after the greeting has finished playing
+    ready_to_listen      = False
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -83,7 +90,6 @@ async def media_stream(websocket: WebSocket):
         }))
 
     async def send_greeting():
-        """Play the opening greeting via TTS, then mark it so we know when it's done."""
         print("[Agent] Sending greeting...")
         async for chunk in tts.synthesize_and_stream(GREETING):
             await send_audio(chunk)
@@ -95,20 +101,23 @@ async def media_stream(websocket: WebSocket):
         nonlocal conversation_history
         full_answer = ""
         try:
-            async for sentence in agent.ask_stream(text, list(conversation_history)):
-                full_answer += sentence
+            async for sentence in agent.ask_stream(
+                text,
+                list(conversation_history),
+                caller_phone=caller_phone,
+            ):
+                full_answer += sentence + " "
                 async for chunk in tts.synthesize_and_stream(sentence):
                     await send_audio(chunk)
             await send_mark("response_done")
             conversation_history = conversation_history + [
                 {"role": "user",      "content": text},
-                {"role": "assistant", "content": full_answer},
+                {"role": "assistant", "content": full_answer.strip()},
             ]
         except asyncio.CancelledError:
             pass  # barge-in: a new transcript arrived
         except Exception as e:
             print(f"[Agent] Error in pipeline: {e}")
-            # Play fallback so the caller never hears dead silence
             try:
                 async for chunk in tts.synthesize_and_stream(FALLBACK):
                     await send_audio(chunk)
@@ -118,7 +127,7 @@ async def media_stream(websocket: WebSocket):
     async def handle_transcript(text: str):
         nonlocal response_task, ready_to_listen
         if not ready_to_listen:
-            return  # ignore anything picked up while greeting was playing
+            return
         print(f"[STT→LLM] Received: {text}")
         if response_task and not response_task.done():
             response_task.cancel()
@@ -131,10 +140,11 @@ async def media_stream(websocket: WebSocket):
             data = json.loads(message)
 
             if data["event"] == "start":
-                stream_sid     = data["start"]["streamSid"]
-                print(f"[Twilio] Stream started: {stream_sid}")
+                stream_sid   = data["start"]["streamSid"]
+                caller_phone = data["start"].get("customParameters", {}).get("caller_phone")
+                print(f"[Twilio] Stream started: {stream_sid} | caller: {caller_phone}")
                 stt_connection = await stt.transcribe_stream(handle_transcript)
-                asyncio.create_task(send_greeting())   # play greeting, then mark
+                asyncio.create_task(send_greeting())
 
             elif data["event"] == "media":
                 if stt_connection:
