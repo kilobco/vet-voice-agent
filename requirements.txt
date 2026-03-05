@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+python-multipart
 websockets==13.1
 deepgram-sdk>=3.0.0,<4.0.0
 anthropic
