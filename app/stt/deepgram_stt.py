@@ -22,7 +22,7 @@ class DeepgramSTT:
 
         async def on_message(self_event, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
-            if sentence.strip() and result.is_final and len(sentence.split()) >= 3:
+            if sentence.strip() and result.is_final and len(sentence.split()) >= 1:
                 await on_transcript(sentence)
 
         async def on_error(self_event, error, **kwargs):
