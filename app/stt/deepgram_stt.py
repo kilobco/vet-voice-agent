@@ -22,7 +22,7 @@ class DeepgramSTT:
 
         async def on_message(self_event, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
-            if sentence.strip() and result.is_final:
+            if sentence.strip() and result.is_final and len(sentence.split()) >= 3:
                 await on_transcript(sentence)
 
         async def on_error(self_event, error, **kwargs):
@@ -43,7 +43,7 @@ class DeepgramSTT:
             channels        = 1,
             sample_rate     = 8000,      # Twilio sample rate
             interim_results = True,      # partial results while speaking
-            utterance_end_ms= "1000",    # end of utterance after 1s silence
+            utterance_end_ms= "1500",    # end of utterance after 1s silence
             vad_events      = True,      # voice activity detection
         )
 
