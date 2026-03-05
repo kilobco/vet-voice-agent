@@ -32,8 +32,14 @@ If you don't know the answer to a clinical question, politely say you will conne
 
 
 def _split_sentences(text: str) -> list[str]:
-    parts = re.split(r'(?<=[.!?])\s+', text.strip())
-    return [p.strip() for p in parts if p.strip()]
+    # Protect common abbreviations from being treated as sentence ends
+    protected = re.sub(
+        r'\b(Dr|Mr|Mrs|Ms|Prof|St|vs|etc)\.\s+',
+        lambda m: m.group(0).replace('. ', '<<DOT>>'),
+        text,
+    )
+    parts = re.split(r'(?<=[.!?])\s+', protected.strip())
+    return [p.replace('<<DOT>>', '. ').strip() for p in parts if p.strip()]
 
 
 class LLMAgent:
@@ -42,22 +48,24 @@ class LLMAgent:
         self.rag     = rag
         self.booking = booking
 
-    async def ask_stream(self, question: str, conversation_history: list = None, caller_phone: str = None):
-        if conversation_history is None:
-            conversation_history = []
-
+    async def ask_stream(self, question: str, full_messages: list, caller_phone: str = None):
+        """
+        full_messages is the mutable conversation history for the entire call.
+        Tool calls and results are stored in it so the agent never re-does
+        lookups it already performed earlier in the call.
+        """
         docs    = await self.rag.retrieve(question)
         context = self.rag.format_context(docs)
 
-        user_message = f"""Context from veterinary knowledge base:
+        user_content = f"""Context from veterinary knowledge base:
 {context}
 
 Customer question: {question}
 
 Answer the customer's question. If they want to book an appointment, use the available tools."""
 
-        messages = conversation_history + [{"role": "user", "content": user_message}]
-        system   = _build_system_prompt(caller_phone)
+        full_messages.append({"role": "user", "content": user_content})
+        system = _build_system_prompt(caller_phone)
 
         # ── Tool-calling loop ─────────────────────────────────────────────────
         while True:
@@ -65,7 +73,7 @@ Answer the customer's question. If they want to book an appointment, use the ava
                 model      = "claude-sonnet-4-6",
                 max_tokens = 500,
                 system     = system,
-                messages   = messages,
+                messages   = full_messages,
                 tools      = TOOL_DEFINITIONS,
             )
 
@@ -81,15 +89,17 @@ Answer the customer's question. If they want to book an appointment, use the ava
                             "tool_use_id": block.id,
                             "content":     result,
                         })
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user",      "content": tool_results})
+                # Store full tool exchange in history so next turn remembers it
+                full_messages.append({"role": "assistant", "content": response.content})
+                full_messages.append({"role": "user",      "content": tool_results})
 
             else:
-                # Final text response — split into sentences for TTS
                 final_text = ""
                 for block in response.content:
                     if hasattr(block, "text"):
                         final_text += block.text
+
+                full_messages.append({"role": "assistant", "content": final_text})
 
                 for sentence in _split_sentences(final_text):
                     print(f"[LLM] Chunk: {sentence}")

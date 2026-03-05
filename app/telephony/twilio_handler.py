@@ -66,12 +66,12 @@ async def media_stream(websocket: WebSocket):
     await websocket.accept()
     print("[Twilio] WebSocket connected")
 
-    stream_sid           = None
-    caller_phone         = None
-    stt_connection       = None
-    response_task        = None
-    conversation_history = []
-    ready_to_listen      = False
+    stream_sid    = None
+    caller_phone  = None
+    stt_connection = None
+    response_task  = None
+    full_messages  = []   # full history including tool calls — persists entire call
+    ready_to_listen = False
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -98,22 +98,15 @@ async def media_stream(websocket: WebSocket):
     # ── Main pipeline ─────────────────────────────────────────────────────────
 
     async def _respond(text: str):
-        nonlocal conversation_history
-        full_answer = ""
         try:
             async for sentence in agent.ask_stream(
                 text,
-                list(conversation_history),
+                full_messages,
                 caller_phone=caller_phone,
             ):
-                full_answer += sentence + " "
                 async for chunk in tts.synthesize_and_stream(sentence):
                     await send_audio(chunk)
             await send_mark("response_done")
-            conversation_history = conversation_history + [
-                {"role": "user",      "content": text},
-                {"role": "assistant", "content": full_answer.strip()},
-            ]
         except asyncio.CancelledError:
             pass  # barge-in: a new transcript arrived
         except Exception as e:
